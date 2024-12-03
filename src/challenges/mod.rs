@@ -1,6 +1,7 @@
 use axum::{http::StatusCode, response::IntoResponse, Router};
 
 mod challenge0;
+mod challenge1;
 
 #[derive(Debug)]
 pub struct AppError(anyhow::Error);
@@ -21,5 +22,7 @@ impl<E: Into<anyhow::Error>> From<E> for AppError {
     }
 }
 pub(crate) fn router() -> Router {
-    Router::new().nest("/", challenge0::router())
+    Router::new()
+        .nest("/", challenge0::router())
+        .nest("/2", challenge1::router())
 }
