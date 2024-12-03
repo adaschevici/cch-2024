@@ -8,6 +8,11 @@ struct FromIpToIp {
     key: String,
 }
 
+#[derive(Deserialize)]
+struct FromDestToIp {
+    from: String,
+    to: String,
+}
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Ipv4 {
     octets: [u8; 4],
@@ -52,6 +57,16 @@ impl Ipv4 {
             ],
         }
     }
+    pub fn sub(&self, other: &Ipv4) -> Ipv4 {
+        Ipv4 {
+            octets: [
+                self.octets[0].wrapping_sub(other.octets[0]),
+                self.octets[1].wrapping_sub(other.octets[1]),
+                self.octets[2].wrapping_sub(other.octets[2]),
+                self.octets[3].wrapping_sub(other.octets[3]),
+            ],
+        }
+    }
 }
 
 async fn calculate_ipv5_sum(Query(source_dest): Query<FromIpToIp>) -> String {
@@ -61,6 +76,14 @@ async fn calculate_ipv5_sum(Query(source_dest): Query<FromIpToIp>) -> String {
     format!("{}", from.add(&key).to_string())
 }
 
+async fn calculate_ipv5_sub(Query(dest_source): Query<FromDestToIp>) -> String {
+    let from = Ipv4::from_str(&dest_source.from).unwrap();
+    let to = Ipv4::from_str(&dest_source.to).unwrap();
+
+    format!("{}", to.sub(&from).to_string())
+}
 pub fn router() -> Router {
-    Router::new().route("/dest", get(calculate_ipv5_sum))
+    Router::new()
+        .route("/dest", get(calculate_ipv5_sum))
+        .route("/key", get(calculate_ipv5_sub))
 }
