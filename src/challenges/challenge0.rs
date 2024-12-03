@@ -23,6 +23,6 @@ async fn redirect_to() -> Response {
 
 pub fn router() -> Router {
     Router::new()
-        .route("/-1", get(hello_bird))
+        .route("/", get(hello_bird))
         .route("/-1/seek", get(redirect_to))
 }
