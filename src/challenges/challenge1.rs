@@ -1,6 +1,6 @@
 use axum::{extract::Query, routing::get, Router};
 use serde::Deserialize;
-use std::net::AddrParseError;
+use std::net::{AddrParseError, Ipv6Addr};
 
 #[derive(Deserialize)]
 struct FromIpToIp {
@@ -69,6 +69,48 @@ impl Ipv4 {
     }
 }
 
+pub struct Ipv6 {
+    segments: [u16; 8],
+}
+
+impl Ipv6 {
+    /// Create a new Ipv6 instance from eight 16-bit segments.
+    ///
+    /// For example: `Ipv6::new(0xfe80, 0, 0, 0, 0, 0, 0, 1)` represents `fe80::1`
+    pub fn new(s1: u16, s2: u16, s3: u16, s4: u16, s5: u16, s6: u16, s7: u16, s8: u16) -> Self {
+        Ipv6 {
+            segments: [s1, s2, s3, s4, s5, s6, s7, s8],
+        }
+    }
+
+    /// Parse an IPv6 address from a string, e.g. "fe80::1"
+    pub fn from_str(ip_str: &str) -> Result<Self, AddrParseError> {
+        let addr = ip_str.parse::<Ipv6Addr>()?;
+        Ok(Ipv6 {
+            segments: addr.segments(),
+        })
+    }
+
+    /// Get the internal segments.
+    pub fn segments(&self) -> [u16; 8] {
+        self.segments
+    }
+
+    /// Convert the IPv6 address back to a standard IPv6 string.
+    /// This will produce a compressed form if possible, e.g. "fe80::1".
+    pub fn to_string(&self) -> String {
+        let addr = Ipv6Addr::from(self.segments);
+        addr.to_string()
+    }
+    pub fn xor(&self, other: &Ipv6) -> Ipv6 {
+        let mut result = [0_u16; 8];
+        for i in 0..8 {
+            result[i] = self.segments[i] ^ other.segments[i];
+        }
+        Ipv6 { segments: result }
+    }
+}
+
 async fn calculate_ipv5_sum(Query(source_dest): Query<FromIpToIp>) -> String {
     let from = Ipv4::from_str(&source_dest.from).unwrap();
     let key = Ipv4::from_str(&source_dest.key).unwrap();
@@ -82,8 +124,25 @@ async fn calculate_ipv5_sub(Query(dest_source): Query<FromDestToIp>) -> String {
 
     format!("{}", to.sub(&from).to_string())
 }
+
+async fn calculate_ipv6_sum(Query(source_dest): Query<FromIpToIp>) -> String {
+    let from = Ipv6::from_str(&source_dest.from).unwrap();
+    let key = Ipv6::from_str(&source_dest.key).unwrap();
+
+    format!("{}", from.xor(&key).to_string())
+}
+
+async fn calculate_ipv6_sub(Query(dest_source): Query<FromDestToIp>) -> String {
+    let from = Ipv6::from_str(&dest_source.from).unwrap();
+    let to = Ipv6::from_str(&dest_source.to).unwrap();
+
+    format!("{}", to.xor(&from).to_string())
+}
+
 pub fn router() -> Router {
     Router::new()
         .route("/dest", get(calculate_ipv5_sum))
         .route("/key", get(calculate_ipv5_sub))
+        .route("/v6/dest", get(calculate_ipv6_sum))
+        .route("/v6/key", get(calculate_ipv6_sub))
 }
