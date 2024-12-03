@@ -1666,6 +1666,8 @@ dependencies = [
  "anyhow",
  "axum 0.7.9",
  "axum-macros 0.3.8",
+ "serde",
+ "serde_json",
  "shuttle-axum",
  "shuttle-runtime",
  "tokio",
