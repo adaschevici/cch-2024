@@ -8,6 +8,7 @@ use axum::{
 };
 use cargo_manifest::Manifest;
 use serde::{Deserialize, Serialize};
+use serde_yaml;
 use thiserror::Error;
 
 #[derive(Deserialize, Serialize, Debug)]
@@ -17,7 +18,8 @@ struct Package {
 
 #[derive(Deserialize, Serialize, Debug)]
 struct PackageInfo {
-    metadata: Metadata,
+    metadata: Option<Metadata>,
+    keywords: Option<Vec<String>>,
 }
 
 #[derive(Deserialize, Serialize, Debug)]
@@ -37,20 +39,40 @@ enum AppError {
     #[error("Failed to parse TOML: {0}")]
     TomlParseError(#[from] toml::de::Error),
 
+    #[error("Failed to parse JSON: {0}")]
+    JsonParseError(#[from] serde_json::Error),
+
+    #[error("Failed to parse YAML: {0}")]
+    YamlParseError(#[from] serde_yaml::Error),
+
     #[error("Missing Content-Type header")]
     MissingContentType,
+
+    #[error("Unsupported media type")]
+    UnsupportedMediaType,
 
     #[error("Invalid Content-Type header")]
     InvalidContentType,
 
     #[error("Invalid Cargo manifest")]
     InvalidManifest,
+
+    #[error("Magic keyword not provided")]
+    MagicKeywordNotFound,
 }
 
 impl IntoResponse for AppError {
     fn into_response(self) -> Response {
         let (status, error_message) = match self {
             AppError::TomlParseError(_) => (StatusCode::NO_CONTENT, "Failed to parse TOML"),
+            AppError::JsonParseError(_) => (StatusCode::NO_CONTENT, "Failed to parse JSON"),
+            AppError::YamlParseError(_) => (StatusCode::NO_CONTENT, "Failed to parse YAML"),
+            AppError::MagicKeywordNotFound => {
+                (StatusCode::BAD_REQUEST, "Magic keyword not provided")
+            }
+            AppError::UnsupportedMediaType => {
+                (StatusCode::UNSUPPORTED_MEDIA_TYPE, "Unsupported media type")
+            }
             AppError::MissingContentType | AppError::InvalidContentType => {
                 (StatusCode::BAD_REQUEST, "Invalid Content-Type")
             }
@@ -69,14 +91,32 @@ async fn extract_toml(headers: HeaderMap, body: String) -> Result<String, AppErr
         .get(axum::http::header::CONTENT_TYPE)
         .ok_or(AppError::MissingContentType)?;
 
-    // Check if the Content-Type is "application/toml"
-    if content_type != "application/toml" {
-        return Err(AppError::InvalidContentType);
+    // Check if the Content-Type is allowed
+    // let allowed_content_type = ["application/toml", "application/yaml", "application/json"];
+    let content_type_str = content_type.to_str().unwrap().to_lowercase();
+    // if !allowed_content_type.contains(&content_type_str.as_str()) {
+    //     return Err(AppError::UnsupportedMediaType);
+    // }
+    let payload: Package = match content_type_str.as_str() {
+        "application/toml" => toml::from_str::<Package>(&body)?,
+        "application/yaml" => serde_yaml::from_str::<Package>(&body)?,
+        "application/json" => serde_json::from_str::<Package>(&body)?,
+        _ => return Err(AppError::UnsupportedMediaType),
+    };
+    println!("{:?}", payload);
+
+    if !payload
+        .package
+        .keywords
+        .unwrap_or(vec![])
+        .contains(&String::from("Christmas 2024"))
+    {
+        return Err(AppError::MagicKeywordNotFound);
     }
-    let payload = toml::from_str::<Package>(&body)?;
     let response_parts: Vec<String> = payload
         .package
         .metadata
+        .unwrap_or(Metadata { orders: vec![] })
         .orders
         .iter()
         .filter_map(|order| {
