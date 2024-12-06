@@ -82,10 +82,6 @@ impl IntoResponse for AppError {
     }
 }
 async fn extract_toml(headers: HeaderMap, body: String) -> Result<String, AppError> {
-    match Manifest::from_slice(body.as_bytes()) {
-        Ok(_) => {}
-        Err(_e) => return Err(AppError::InvalidManifest),
-    }
     let content_type = headers
         .get(axum::http::header::CONTENT_TYPE)
         .ok_or(AppError::MissingContentType)?;
@@ -102,8 +98,11 @@ async fn extract_toml(headers: HeaderMap, body: String) -> Result<String, AppErr
         "application/json" => serde_json::from_str::<Package>(&body)?,
         _ => return Err(AppError::UnsupportedMediaType),
     };
-    println!("{:?}", payload);
 
+    match Manifest::from_slice(body.as_bytes()) {
+        Ok(_) => {}
+        Err(_e) => return Err(AppError::InvalidManifest),
+    }
     if !payload
         .package
         .keywords
