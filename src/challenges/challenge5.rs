@@ -51,8 +51,8 @@ enum AppError {
     #[error("Unsupported media type")]
     UnsupportedMediaType,
 
-    #[error("Invalid Content-Type header")]
-    InvalidContentType,
+    #[error("No Content Returned")]
+    NoContent,
 
     #[error("Invalid Cargo manifest")]
     InvalidManifest,
@@ -67,15 +67,14 @@ impl IntoResponse for AppError {
             AppError::TomlParseError(_) => (StatusCode::NO_CONTENT, "Failed to parse TOML"),
             AppError::JsonParseError(_) => (StatusCode::NO_CONTENT, "Failed to parse JSON"),
             AppError::YamlParseError(_) => (StatusCode::NO_CONTENT, "Failed to parse YAML"),
+            AppError::NoContent => (StatusCode::NO_CONTENT, "No Content Returned"),
             AppError::MagicKeywordNotFound => {
                 (StatusCode::BAD_REQUEST, "Magic keyword not provided")
             }
             AppError::UnsupportedMediaType => {
                 (StatusCode::UNSUPPORTED_MEDIA_TYPE, "Unsupported media type")
             }
-            AppError::MissingContentType | AppError::InvalidContentType => {
-                (StatusCode::BAD_REQUEST, "Invalid Content-Type")
-            }
+            AppError::MissingContentType => (StatusCode::BAD_REQUEST, "Invalid Content-Type"),
             AppError::InvalidManifest => (StatusCode::BAD_REQUEST, "Invalid manifest"),
         };
 
@@ -135,6 +134,9 @@ async fn extract_toml(headers: HeaderMap, body: String) -> Result<String, AppErr
         })
         .map(|order| format!("{}: {}", order.item, order.quantity.unwrap()))
         .collect();
+    if response_parts.is_empty() {
+        return Err(AppError::NoContent);
+    }
 
     let response = response_parts.join("\n");
     Ok(response)
