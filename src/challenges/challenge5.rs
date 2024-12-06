@@ -28,7 +28,8 @@ struct Metadata {
 #[derive(Deserialize, Serialize, Debug)]
 struct Order {
     item: String,
-    quantity: u32,
+    quantity: Option<f32>,
+    count: Option<u32>,
 }
 
 #[derive(Error, Debug)]
@@ -41,6 +42,9 @@ enum AppError {
 
     #[error("Invalid Content-Type header")]
     InvalidContentType,
+
+    #[error("Invalid Cargo manifest")]
+    InvalidManifest,
 }
 
 impl IntoResponse for AppError {
@@ -50,6 +54,7 @@ impl IntoResponse for AppError {
             AppError::MissingContentType | AppError::InvalidContentType => {
                 (StatusCode::BAD_REQUEST, "Invalid Content-Type")
             }
+            AppError::InvalidManifest => (StatusCode::BAD_REQUEST, "Invalid manifest"),
         };
 
         (status, error_message).into_response()
@@ -58,14 +63,14 @@ impl IntoResponse for AppError {
 async fn extract_toml(headers: HeaderMap, body: String) -> Result<String, AppError> {
     match Manifest::from_slice(body.as_bytes()) {
         Ok(_) => {}
-        Err(_e) => return Err(AppError::InvalidContentType),
+        Err(_e) => return Err(AppError::InvalidManifest),
     }
     let content_type = headers
         .get(axum::http::header::CONTENT_TYPE)
         .ok_or(AppError::MissingContentType)?;
 
     // Check if the Content-Type is "application/toml"
-    if content_type.to_str().unwrap().to_lowercase() != "application/toml" {
+    if content_type != "application/toml" {
         return Err(AppError::InvalidContentType);
     }
     let payload = toml::from_str::<Package>(&body)?;
@@ -74,10 +79,25 @@ async fn extract_toml(headers: HeaderMap, body: String) -> Result<String, AppErr
         .metadata
         .orders
         .iter()
-        .map(|order| format!("{}: {}", order.item, order.quantity))
+        .filter_map(|order| {
+            if order.quantity.is_some() {
+                Some(order)
+            } else {
+                None
+            }
+        })
+        .filter_map(|order| {
+            if order.quantity.unwrap().fract() == 0.0 {
+                Some(order)
+            } else {
+                None
+            }
+        })
+        .map(|order| format!("{}: {}", order.item, order.quantity.unwrap()))
         .collect();
 
-    Ok(response_parts.join("\n"))
+    let response = response_parts.join("\n");
+    Ok(response)
 }
 
 pub fn router() -> Router {
