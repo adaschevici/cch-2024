@@ -1,5 +1,4 @@
 use axum::{
-    extract::Json,
     http::{HeaderMap, StatusCode},
     // TODO: This was a mind bender, need to use Result from
     // axum to be able to return it from handler
@@ -7,6 +6,7 @@ use axum::{
     routing::post,
     Router,
 };
+use cargo_manifest::Manifest;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -56,6 +56,10 @@ impl IntoResponse for AppError {
     }
 }
 async fn extract_toml(headers: HeaderMap, body: String) -> Result<String, AppError> {
+    match Manifest::from_slice(body.as_bytes()) {
+        Ok(_) => {}
+        Err(_e) => return Err(AppError::InvalidContentType),
+    }
     let content_type = headers
         .get(axum::http::header::CONTENT_TYPE)
         .ok_or(AppError::MissingContentType)?;
