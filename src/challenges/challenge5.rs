@@ -46,7 +46,7 @@ enum AppError {
 impl IntoResponse for AppError {
     fn into_response(self) -> Response {
         let (status, error_message) = match self {
-            AppError::TomlParseError(_) => (StatusCode::BAD_REQUEST, "Failed to parse TOML"),
+            AppError::TomlParseError(_) => (StatusCode::NO_CONTENT, "Failed to parse TOML"),
             AppError::MissingContentType | AppError::InvalidContentType => {
                 (StatusCode::BAD_REQUEST, "Invalid Content-Type")
             }
@@ -55,18 +55,25 @@ impl IntoResponse for AppError {
         (status, error_message).into_response()
     }
 }
-async fn extract_toml(headers: HeaderMap, body: String) -> Result<Json<Package>, AppError> {
+async fn extract_toml(headers: HeaderMap, body: String) -> Result<String, AppError> {
     let content_type = headers
         .get(axum::http::header::CONTENT_TYPE)
         .ok_or(AppError::MissingContentType)?;
 
     // Check if the Content-Type is "application/toml"
-    if content_type != "application/toml" {
+    if content_type.to_str().unwrap().to_lowercase() != "application/toml" {
         return Err(AppError::InvalidContentType);
     }
     let payload = toml::from_str::<Package>(&body)?;
-    println!("{:?}", payload);
-    Ok(Json(payload))
+    let response_parts: Vec<String> = payload
+        .package
+        .metadata
+        .orders
+        .iter()
+        .map(|order| format!("{}: {}", order.item, order.quantity))
+        .collect();
+
+    Ok(response_parts.join("\n"))
 }
 
 pub fn router() -> Router {
