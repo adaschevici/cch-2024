@@ -20,6 +20,8 @@ struct Package {
 struct PackageInfo {
     metadata: Option<Metadata>,
     keywords: Option<Vec<String>>,
+    #[serde(rename = "rust-version")]
+    rust_version: Option<String>,
 }
 
 #[derive(Deserialize, Serialize, Debug)]
@@ -92,17 +94,20 @@ async fn extract_toml(headers: HeaderMap, body: String) -> Result<String, AppErr
     // if !allowed_content_type.contains(&content_type_str.as_str()) {
     //     return Err(AppError::UnsupportedMediaType);
     // }
+    if content_type_str == "application/toml" {
+        match Manifest::from_slice(body.as_bytes()) {
+            Ok(_) => {}
+            Err(_e) => return Err(AppError::InvalidManifest),
+        }
+    }
+
     let payload: Package = match content_type_str.as_str() {
         "application/toml" => toml::from_str::<Package>(&body)?,
-        "application/yaml" => serde_yaml::from_str::<Package>(&body)?,
-        "application/json" => serde_json::from_str::<Package>(&body)?,
+        "application/yaml" => serde_yaml::from_str::<Package>(&body).unwrap(),
+        "application/json" => serde_json::from_str::<Package>(&body).unwrap(),
         _ => return Err(AppError::UnsupportedMediaType),
     };
 
-    match Manifest::from_slice(body.as_bytes()) {
-        Ok(_) => {}
-        Err(_e) => return Err(AppError::InvalidManifest),
-    }
     if !payload
         .package
         .keywords
@@ -110,6 +115,18 @@ async fn extract_toml(headers: HeaderMap, body: String) -> Result<String, AppErr
         .contains(&String::from("Christmas 2024"))
     {
         return Err(AppError::MagicKeywordNotFound);
+    }
+    if content_type_str != "application/toml" {
+        if payload.package.rust_version.is_some()
+            && payload
+                .package
+                .rust_version
+                .unwrap()
+                .parse::<f32>()
+                .is_err()
+        {
+            return Err(AppError::InvalidManifest);
+        };
     }
     let response_parts: Vec<String> = payload
         .package
