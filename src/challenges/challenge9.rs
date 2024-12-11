@@ -47,6 +47,7 @@ impl IntoResponse for AppError {
 #[serde(rename_all = "lowercase")]
 enum Unit {
     Liters(f64),
+    Litres(f64),
     Gallons(f64),
     Pints(f64),
 }
@@ -74,11 +75,14 @@ async fn get_milk(
             Unit::Liters(payload) => {
                 return Ok(json!({"gallons": payload * 0.264172}).to_string());
             }
+            Unit::Litres(payload) => {
+                return Ok(json!({"pints": payload * 1.75975}).to_string());
+            }
             Unit::Gallons(payload) => {
                 return Ok(json!({"liters": payload * 3.78541}).to_string());
             }
             Unit::Pints(payload) => {
-                return Ok(json!({"liters": payload * 0.473176}).to_string());
+                return Ok(json!({"litres": payload * 0.568261}).to_string());
             }
         }
     }
