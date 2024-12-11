@@ -1,13 +1,14 @@
 use axum::{
     extract::State,
-    http::StatusCode,
-    response::{IntoResponse, Response},
+    http::{HeaderMap, StatusCode},
+    response::{IntoResponse, Response, Result},
     routing::post,
     Json, Router,
 };
 use leaky_bucket::RateLimiter;
 use serde::{Deserialize, Serialize};
 use std::{sync::Arc, time::Duration};
+use thiserror::Error;
 use tokio::sync::Mutex;
 
 type MilkBucket = Arc<Mutex<RateLimiter>>;
@@ -16,31 +17,42 @@ const BUCKET_INITIAL: usize = 5;
 const BUCKET_CAPACITY: usize = 5;
 const BUCKET_REFILL_RATE: usize = 1;
 
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-enum Payload {
-    Liters(f32),
-    Litres(f32),
-    Gallons(f32),
-    Pints(f32),
+#[derive(Error, Debug)]
+enum AppError {
+    #[error("Failed to parse JSON: {0}")]
+    JsonParseError(#[from] serde_json::Error),
+
+    #[error("Missing Content-Type header")]
+    MissingContentType,
+
+    #[error("Too many requests")]
+    TooManyRequests,
 }
-impl Payload {
-    fn cal(self) -> Self {
-        match self {
-            Self::Liters(n) => Self::Gallons(0.264172060 * n),
-            Self::Gallons(n) => Self::Liters(3.78541 * n),
-            Self::Litres(n) => Self::Pints(1.759754 * n),
-            Self::Pints(n) => Self::Litres(0.56826125 * n),
-        }
+
+impl IntoResponse for AppError {
+    fn into_response(self) -> Response {
+        let (status, error_message) = match self {
+            AppError::JsonParseError(_) => (StatusCode::NO_CONTENT, "Failed to parse JSON"),
+            AppError::MissingContentType => (StatusCode::BAD_REQUEST, "Invalid Content-Type"),
+            AppError::TooManyRequests => (StatusCode::TOO_MANY_REQUESTS, "No milk available\n"),
+        };
+
+        (status, error_message).into_response()
     }
 }
 
-async fn get_milk(State(bucket): State<MilkBucket>) -> impl IntoResponse {
+async fn get_milk(
+    State(bucket): State<MilkBucket>,
+    headers: HeaderMap,
+) -> Result<String, AppError> {
     let got_milk = bucket.lock().await.try_acquire(1);
     if !got_milk {
-        return (StatusCode::TOO_MANY_REQUESTS, "No milk available\n").into_response();
+        return Err(AppError::TooManyRequests);
     }
-    (StatusCode::OK, "Milk withdrawn\n").into_response()
+    // let content_type = headers
+    //     .get(axum::http::header::CONTENT_TYPE)
+    //     .ok_or(AppError::MissingContentType)?;
+    Ok("Milk withdrawn\n".to_string())
 }
 
 fn get_rate_limiter() -> RateLimiter {
