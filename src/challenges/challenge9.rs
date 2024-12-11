@@ -9,7 +9,7 @@ use axum::{
 use leaky_bucket::RateLimiter;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use std::{sync::Arc, time::Duration};
+use std::{ops::DerefMut, sync::Arc, time::Duration};
 use thiserror::Error;
 use tokio::sync::Mutex;
 
@@ -97,9 +97,17 @@ fn get_rate_limiter() -> RateLimiter {
         .build()
 }
 
+async fn refill_bucket(State(bucket): State<MilkBucket>) -> Result<String, AppError> {
+    let mut lock = bucket.lock().await;
+    let bucket = lock.deref_mut();
+    *bucket = get_rate_limiter();
+    Ok("Bucket refilled\n".to_string())
+}
+
 pub fn router() -> Router {
     let rate_limiter = Arc::new(Mutex::new(get_rate_limiter()));
     Router::new()
         .route("/milk", post(get_milk))
+        .route("/refill", post(refill_bucket))
         .with_state(rate_limiter.clone())
 }
