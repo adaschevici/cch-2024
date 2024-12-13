@@ -7,6 +7,11 @@ use axum::{
     routing::{get, post},
     Json, Router,
 };
+use tokio::sync::RwLock;
+
+use std::{ops::DerefMut, sync::Arc, time::Duration};
+
+type GameBoardType = Arc<RwLock<GameBoard>>;
 
 #[derive(Debug, Clone)]
 enum BoardLocation {
@@ -55,6 +60,14 @@ impl GameBoard {
             board,
         }
     }
+
+    fn set_cell(&mut self, row: usize, col: usize, value: BoardLocation) -> Result<(), String> {
+        if row >= self.rows || col >= self.columns {
+            return Err("Index out of bounds".to_string());
+        }
+        self.board[row + 1][col + 1] = value; // +1 because of the walls
+        Ok(())
+    }
 }
 
 impl fmt::Display for GameBoard {
@@ -68,17 +81,30 @@ impl fmt::Display for GameBoard {
         Ok(())
     }
 }
-async fn get_board() -> String {
-    let board = GameBoard::new(5, 6);
-    return format!("{}", board.to_string());
+async fn get_board(State(board): State<GameBoardType>) -> String {
+    let board_state = board.read().await;
+    return format!("{}", board_state.to_string());
 }
 
-async fn reset_board() -> &'static str {
-    "Board reset!"
+async fn add_piece(State(board): State<GameBoardType>) -> String {
+    let mut write_board = board.write().await;
+    _ = write_board.set_cell(2, 2, BoardLocation::Milk);
+    return format!("{}", write_board.to_string());
+}
+
+async fn reset_board(State(board): State<GameBoardType>) -> String {
+    let new_board = GameBoard::new(5, 6);
+    let mut write_board = board.write().await;
+    *write_board = new_board;
+
+    return format!("Board reset to:\n{}", write_board.to_string());
 }
 
 pub fn router() -> Router {
+    let board = Arc::new(RwLock::new(GameBoard::new(5, 6)));
     Router::new()
         .route("/board", get(get_board))
         .route("/reset", post(reset_board))
+        .route("/addone", post(add_piece))
+        .with_state(board.clone())
 }
