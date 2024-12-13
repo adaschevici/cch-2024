@@ -10,15 +10,32 @@ use axum::{
 use tokio::sync::RwLock;
 
 use std::{ops::DerefMut, sync::Arc, time::Duration};
+use thiserror::Error;
 
 type GameBoardType = Arc<RwLock<GameBoard>>;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 enum BoardLocation {
     Cookie,
     Empty,
     Milk,
     Wall,
+}
+
+#[derive(Error, Debug)]
+enum AppError {
+    #[error("Illegal move")]
+    IllegalMove,
+}
+
+impl IntoResponse for AppError {
+    fn into_response(self) -> Response {
+        let (status, error_message) = match self {
+            AppError::IllegalMove => (StatusCode::BAD_REQUEST, "Illegal move"),
+        };
+
+        (status, error_message).into_response()
+    }
 }
 
 impl fmt::Display for BoardLocation {
@@ -32,7 +49,7 @@ impl fmt::Display for BoardLocation {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 struct GameBoard {
     rows: usize,
     columns: usize,
@@ -61,12 +78,19 @@ impl GameBoard {
         }
     }
 
-    fn set_cell(&mut self, row: usize, col: usize, value: BoardLocation) -> Result<(), String> {
-        if row >= self.rows || col >= self.columns {
-            return Err("Index out of bounds".to_string());
+    fn set_cell(&mut self, col: usize, value: BoardLocation) -> Result<(), String> {
+        if (col > self.columns - 1) || (col < 1) {
+            return Err("Column index out of bounds".to_string());
         }
-        self.board[row + 1][col + 1] = value; // +1 because of the walls
-        Ok(())
+
+        for row in (0..self.rows - 1).rev() {
+            if self.board[row + 1][col] == BoardLocation::Empty {
+                self.board[row + 1][col] = value;
+                return Ok(()); // Successfully placed the piece
+            }
+        }
+
+        Err("Column is full".to_string()) // No empty space found in the column
     }
 }
 
@@ -88,7 +112,7 @@ async fn get_board(State(board): State<GameBoardType>) -> String {
 
 async fn add_piece(State(board): State<GameBoardType>) -> String {
     let mut write_board = board.write().await;
-    _ = write_board.set_cell(2, 2, BoardLocation::Milk);
+    _ = write_board.set_cell(7, BoardLocation::Milk);
     return format!("{}", write_board.to_string());
 }
 
