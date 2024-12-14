@@ -16,10 +16,10 @@ type GameBoardType = Arc<RwLock<GameBoard>>;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum BoardLocation {
-    Cookie,
     Empty,
     Milk,
     Wall,
+    Cookie,
 }
 
 #[derive(Error, Debug)]
@@ -117,11 +117,11 @@ async fn get_board(State(board): State<GameBoardType>) -> String {
 
 async fn add_piece(State(board): State<GameBoardType>) -> Result<(), AppError> {
     let mut write_board = board.write().await;
-    let mut last_move = write_board.set_cell(4, BoardLocation::Milk);
-    last_move = write_board.set_cell(4, BoardLocation::Milk);
-    last_move = write_board.set_cell(4, BoardLocation::Milk);
-    last_move = write_board.set_cell(4, BoardLocation::Milk);
-    last_move = write_board.set_cell(4, BoardLocation::Milk);
+    let mut last_move = write_board.set_cell(9, BoardLocation::Milk);
+    last_move = write_board.set_cell(9, BoardLocation::Milk);
+    last_move = write_board.set_cell(9, BoardLocation::Cookie);
+    last_move = write_board.set_cell(9, BoardLocation::Milk);
+    last_move = write_board.set_cell(9, BoardLocation::Milk);
     println!("{:?}", last_move);
     last_move
 }
@@ -131,7 +131,7 @@ async fn reset_board(State(board): State<GameBoardType>) -> String {
     let mut write_board = board.write().await;
     *write_board = new_board;
 
-    return format!("Board reset to:\n{}", write_board.to_string());
+    return format!("{}", write_board.to_string());
 }
 
 pub fn router() -> Router {
