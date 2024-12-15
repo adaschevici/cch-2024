@@ -213,11 +213,13 @@ impl GameBoard {
         return (false, player);
     }
     fn check(&self, starting_position: Option<(usize, usize)>) -> GameResult {
-        let non_empty_cells = self.board.iter().flatten().filter(|x| {
-            println!("{:?}", x);
-            x != &&BoardLocation::Empty
-        });
-
+        let empty_cells = self
+            .board
+            .iter()
+            .flat_map(|row| row.iter())
+            .filter(|x| x == &&BoardLocation::Empty)
+            .count();
+        println!("{:?}", empty_cells);
         if let Some((row, col)) = starting_position {
             let (horizontal_win, player) = self.check_horizontal(row, col);
             if horizontal_win {
@@ -289,6 +291,7 @@ enum GameResult {
 
 async fn get_board(State(board): State<GameBoardType>) -> String {
     let board_state = board.read().await;
+    board_state.check(None);
     return format!("{}", board_state.to_string());
 }
 
@@ -326,6 +329,6 @@ pub fn router() -> Router {
     Router::new()
         .route("/board", get(get_board))
         .route("/reset", post(reset_board))
-        .route("/place/:team/:column", post(place_piece))
+        // .route("/place/:team/:column", post(place_piece))
         .with_state(board.clone())
 }
