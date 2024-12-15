@@ -1,7 +1,8 @@
 use std::fmt;
+use std::str::FromStr;
 
 use axum::{
-    extract::{Request, State},
+    extract::{Path, State},
     http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response, Result},
     routing::{get, post},
@@ -14,31 +15,33 @@ use thiserror::Error;
 
 type GameBoardType = Arc<RwLock<GameBoard>>;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-enum BoardLocation {
-    Empty,
-    Milk,
-    Wall,
-    Cookie,
-}
-
 #[derive(Error, Debug)]
 enum AppError {
     #[error("Out of bounds")]
     OutOfBounds,
     #[error("Column overflow")]
     ColumnOverflow,
+    #[error("Invalid piece")]
+    InvalidPiece,
 }
 
 impl IntoResponse for AppError {
     fn into_response(self) -> Response {
         let (status, error_message) = match self {
             AppError::OutOfBounds => (StatusCode::BAD_REQUEST, "Out of bounds"),
-            AppError::ColumnOverflow => (StatusCode::BAD_REQUEST, "Column overflow"),
+            AppError::ColumnOverflow => (StatusCode::SERVICE_UNAVAILABLE, "Column overflow"),
+            AppError::InvalidPiece => (StatusCode::NOT_FOUND, "Invalid piece"),
         };
 
         (status, error_message).into_response()
     }
+}
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum BoardLocation {
+    Empty,
+    Milk,
+    Wall,
+    Cookie,
 }
 
 impl fmt::Display for BoardLocation {
@@ -48,6 +51,21 @@ impl fmt::Display for BoardLocation {
             BoardLocation::Empty => write!(f, "⬛"),
             BoardLocation::Milk => write!(f, "🥛"),
             BoardLocation::Wall => write!(f, "⬜"),
+        }
+    }
+}
+
+impl FromStr for BoardLocation {
+    type Err = AppError;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "🍪" => Ok(BoardLocation::Cookie),
+            "⬛" => Ok(BoardLocation::Empty),
+            "🥛" => Ok(BoardLocation::Milk),
+            "⬜" => Ok(BoardLocation::Wall),
+            "cookie" => Ok(BoardLocation::Cookie),
+            "milk" => Ok(BoardLocation::Milk),
+            _ => Err(AppError::InvalidPiece),
         }
     }
 }
@@ -81,9 +99,160 @@ impl GameBoard {
         }
     }
 
-    fn set_cell(&mut self, col: usize, value: BoardLocation) -> Result<(), AppError> {
-        println!("Setting cell at column {} to {:?}", col, value);
-        println!("{}, {}", self.rows, self.columns);
+    fn check_horizontal(&self, row: usize, col: usize) -> (bool, BoardLocation) {
+        let player = self.board[row][col].clone();
+        let mut count = 0;
+        for i in (0..=3)
+            .map(|i| col as i32 - i)
+            .filter(|&x| x >= 1 && x <= self.columns as i32)
+            .map(|x| x as usize)
+        {
+            if self.board[row][i] == player {
+                count += 1;
+            } else {
+                break;
+            }
+        }
+        for i in 1..=3 {
+            let new_col = col + i;
+            if new_col <= self.columns && self.board[row][new_col] == player {
+                count += 1;
+            } else {
+                break;
+            }
+        }
+        if count >= 4 {
+            return (true, player);
+        }
+        return (false, player);
+    }
+
+    fn check_vertical(&self, row: usize, col: usize) -> (bool, BoardLocation) {
+        let player = self.board[row][col].clone();
+        let mut count = 0;
+        for i in (0..=3)
+            .map(|i| row as i32 - i)
+            .filter(|&x| x >= 1 && x <= self.rows as i32)
+            .map(|x| x as usize)
+        {
+            if self.board[i][col] == player {
+                count += 1;
+            } else {
+                break;
+            }
+        }
+        for i in 1..=3 {
+            let new_row = row + i;
+            if new_row <= self.rows && self.board[new_row][col] == player {
+                count += 1;
+            } else {
+                break;
+            }
+        }
+        if count >= 4 {
+            return (true, player);
+        }
+        return (false, player);
+    }
+
+    fn check_diagonal(&self, row: usize, col: usize) -> (bool, BoardLocation) {
+        let player = self.board[row][col].clone();
+        let mut count = 0;
+        for i in (0..=3)
+            .map(|i| (row as i32 - i, col as i32 - i))
+            .filter(|&(x, y)| x >= 1 && x <= self.rows as i32 && y >= 1 && y <= self.columns as i32)
+            .map(|(x, y)| (x as usize, y as usize))
+        {
+            if self.board[i.0][i.1] == player {
+                count += 1;
+            } else {
+                break;
+            }
+        }
+        for i in 1..=3 {
+            let new_row = row + i;
+            let new_col = col + i;
+            if new_row <= self.rows
+                && new_col <= self.columns
+                && self.board[new_row][new_col] == player
+            {
+                count += 1;
+            } else {
+                break;
+            }
+        }
+        if count >= 4 {
+            return (true, player);
+        }
+
+        // Check diagonal (bottom-left to top-right)
+        let mut count = 0;
+        for i in (0..=3)
+            .map(|i| (row as i32 + i, col as i32 - i))
+            .filter(|&(x, y)| x >= 1 && x <= self.rows as i32 && y >= 1 && y <= self.columns as i32)
+            .map(|(x, y)| (x as usize, y as usize))
+        {
+            if self.board[i.0][i.1] == player {
+                count += 1;
+            } else {
+                break;
+            }
+        }
+        for i in 1..=3 {
+            let new_row = row - i;
+            let new_col = col + i;
+            if new_row >= 1 && new_col <= self.columns && self.board[new_row][new_col] == player {
+                count += 1;
+            } else {
+                break;
+            }
+        }
+        if count >= 4 {
+            return (true, player);
+        }
+        return (false, player);
+    }
+    fn check(&self, starting_position: Option<(usize, usize)>) -> GameResult {
+        let non_empty_cells = self.board.iter().flatten().filter(|x| {
+            println!("{:?}", x);
+            x != &&BoardLocation::Empty
+        });
+
+        if let Some((row, col)) = starting_position {
+            let (horizontal_win, player) = self.check_horizontal(row, col);
+            if horizontal_win {
+                return GameResult::Win(player);
+            }
+            let (vertical_win, player) = self.check_vertical(row, col);
+            if vertical_win {
+                return GameResult::Win(player);
+            }
+            let (diagonal_win, player) = self.check_diagonal(row, col);
+            if diagonal_win {
+                return GameResult::Win(player);
+            }
+            return GameResult::InProgress;
+        }
+        for row in 1..=self.rows - 1 {
+            for col in 1..=self.columns - 1 {
+                let (horizontal_win, player) = self.check_horizontal(row, col);
+                if horizontal_win {
+                    return GameResult::Win(player);
+                }
+                let (vertical_win, player) = self.check_vertical(row, col);
+                if vertical_win {
+                    return GameResult::Win(player);
+                }
+                let (diagonal_win, player) = self.check_diagonal(row, col);
+                if diagonal_win {
+                    return GameResult::Win(player);
+                }
+            }
+        }
+        GameResult::InProgress
+    }
+
+    fn set_cell(&mut self, col: usize, value: BoardLocation) -> Result<(usize, usize), AppError> {
         if (col > self.columns - 1) || (col < 1) {
             return Err(AppError::OutOfBounds);
         }
@@ -91,7 +260,7 @@ impl GameBoard {
         for row in (1..self.rows).rev() {
             if self.board[row - 1][col] == BoardLocation::Empty {
                 self.board[row - 1][col] = value;
-                return Ok(()); // Successfully placed the piece
+                return Ok((row - 1, col)); // Successfully placed the piece
             }
         }
 
@@ -110,21 +279,39 @@ impl fmt::Display for GameBoard {
         Ok(())
     }
 }
+
+#[derive(Debug, PartialEq, Eq)]
+enum GameResult {
+    Win(BoardLocation),
+    Draw,
+    InProgress,
+}
+
 async fn get_board(State(board): State<GameBoardType>) -> String {
     let board_state = board.read().await;
     return format!("{}", board_state.to_string());
 }
 
-async fn add_piece(State(board): State<GameBoardType>) -> Result<(), AppError> {
+async fn place_piece(
+    Path((team, column)): Path<(String, usize)>,
+    State(board): State<GameBoardType>,
+) -> Result<(), AppError> {
+    let piece = BoardLocation::from_str(&team)?;
     let mut write_board = board.write().await;
-    let mut last_move = write_board.set_cell(9, BoardLocation::Milk);
-    last_move = write_board.set_cell(9, BoardLocation::Milk);
-    last_move = write_board.set_cell(9, BoardLocation::Cookie);
-    last_move = write_board.set_cell(9, BoardLocation::Milk);
-    last_move = write_board.set_cell(9, BoardLocation::Milk);
-    println!("{:?}", last_move);
-    last_move
+    let current_move = write_board.set_cell(column, piece);
+    Ok(())
 }
+
+// async fn add_piece(State(board): State<GameBoardType>) -> Result<(), AppError> {
+//     let mut write_board = board.write().await;
+//     let mut last_move = write_board.set_cell(9, BoardLocation::Milk);
+//     last_move = write_board.set_cell(9, BoardLocation::Milk);
+//     last_move = write_board.set_cell(9, BoardLocation::Cookie);
+//     last_move = write_board.set_cell(9, BoardLocation::Milk);
+//     last_move = write_board.set_cell(9, BoardLocation::Milk);
+//     println!("{:?}", last_move);
+//     last_move
+// }
 
 async fn reset_board(State(board): State<GameBoardType>) -> String {
     let new_board = GameBoard::new(5, 6);
@@ -139,6 +326,6 @@ pub fn router() -> Router {
     Router::new()
         .route("/board", get(get_board))
         .route("/reset", post(reset_board))
-        .route("/addone", post(add_piece))
+        .route("/place/:team/:column", post(place_piece))
         .with_state(board.clone())
 }
