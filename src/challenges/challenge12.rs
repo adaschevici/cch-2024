@@ -107,7 +107,7 @@ impl GameBoard {
         let mut count = 0;
         for i in (0..=3)
             .map(|i| col as i32 - i)
-            .filter(|&x| x >= 1 && x <= self.columns as i32)
+            .filter(|&x| x >= 0 && x <= self.columns as i32)
             .map(|x| x as usize)
         {
             if self.board[row][i] == player {
@@ -133,12 +133,13 @@ impl GameBoard {
     fn check_vertical(&self, row: usize, col: usize) -> (bool, BoardLocation) {
         let player = self.board[row][col].clone();
         if player == BoardLocation::Wall || player == BoardLocation::Empty {
+            println!("Wall or Empty");
             return (false, player);
         }
         let mut count = 0;
         for i in (0..=3)
             .map(|i| row as i32 - i)
-            .filter(|&x| x >= 1 && x <= self.rows as i32)
+            .filter(|&x| x >= 0 && x <= self.rows as i32)
             .map(|x| x as usize)
         {
             if self.board[i][col] == player {
@@ -198,7 +199,7 @@ impl GameBoard {
         let mut count = 0;
         for i in (0..=3)
             .map(|i| (row as i32 + i, col as i32 - i))
-            .filter(|&(x, y)| x >= 1 && x <= self.rows as i32 && y >= 1 && y <= self.columns as i32)
+            .filter(|&(x, y)| x >= 0 && x <= self.rows as i32 && y >= 1 && y <= self.columns as i32)
             .map(|(x, y)| (x as usize, y as usize))
         {
             if self.board[i.0][i.1] == player {
@@ -207,10 +208,12 @@ impl GameBoard {
                 break;
             }
         }
-        for i in 1..=3 {
-            let new_row = row - i;
-            let new_col = col + i;
-            if new_row >= 1 && new_col <= self.columns && self.board[new_row][new_col] == player {
+        for i in (1..=3)
+            .map(|i| (row as i32 - i, col as i32 + i))
+            .filter(|&(x, y)| x >= 0 && x <= self.rows as i32 && y >= 1 && y <= self.columns as i32)
+            .map(|(x, y)| (x as usize, y as usize))
+        {
+            if self.board[i.0][i.1] == player {
                 count += 1;
             } else {
                 break;
@@ -229,7 +232,6 @@ impl GameBoard {
             .filter(|x| x == &&BoardLocation::Empty)
             .count();
         if let Some((row, col)) = starting_position {
-            println!("{:?}", starting_position);
             let (horizontal_win, player) = self.check_horizontal(row, col);
             if horizontal_win {
                 return GameResult::Win(player);
@@ -243,23 +245,22 @@ impl GameBoard {
                 return GameResult::Win(player);
             }
         }
-        for row in 1..=self.rows - 1 {
-            for col in 1..=self.columns - 1 {
-                println!("Expansive parsing {:?}", (row, col));
-                let (horizontal_win, player) = self.check_horizontal(row, col);
-                if horizontal_win {
-                    return GameResult::Win(player);
-                }
-                let (vertical_win, player) = self.check_vertical(row, col);
-                if vertical_win {
-                    return GameResult::Win(player);
-                }
-                let (diagonal_win, player) = self.check_diagonal(row, col);
-                if diagonal_win {
-                    return GameResult::Win(player);
-                }
-            }
-        }
+        // for row in 1..=self.rows - 1 {
+        //     for col in 1..=self.columns - 1 {
+        //         let (horizontal_win, player) = self.check_horizontal(row, col);
+        //         if horizontal_win {
+        //             return GameResult::Win(player);
+        //         }
+        //         let (vertical_win, player) = self.check_vertical(row, col);
+        //         if vertical_win {
+        //             return GameResult::Win(player);
+        //         }
+        //         // let (diagonal_win, player) = self.check_diagonal(row, col);
+        //         // if diagonal_win {
+        //         //     return GameResult::Win(player);
+        //         // }
+        //     }
+        // }
         if empty_cells == 0 {
             return GameResult::Draw;
         }
@@ -301,10 +302,19 @@ enum GameResult {
     InProgress,
 }
 
+impl fmt::Display for GameResult {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            GameResult::Win(player) => write!(f, "{} wins!", player),
+            GameResult::Draw => write!(f, "Draw!"),
+            GameResult::InProgress => write!(f, "Game in progress"),
+        }
+    }
+}
+
 async fn get_board(State(board): State<GameBoardType>) -> String {
     let board_state = board.read().await;
-    board_state.check(None);
-    return format!("{}", board_state.to_string());
+    return format!("{}{}", board_state.to_string(), board_state.check(None));
 }
 
 async fn place_piece(
@@ -315,15 +325,13 @@ async fn place_piece(
     let mut write_board = board.write().await;
     let current_move = write_board.set_cell(column, piece);
     if let Ok(play) = current_move {
-        println!("{:?}", play);
         let game_status = write_board.check(Some(play));
-        println!("{:?}", game_status);
         match game_status {
             GameResult::Win(player) => {
-                return Ok(format!("{}\n{} wins!", write_board.to_string(), player));
+                return Ok(format!("{}{} wins!", write_board.to_string(), player));
             }
             GameResult::Draw => {
-                return Ok(format!("{}\nDraw!", write_board.to_string()));
+                return Ok(format!("{}No winner.", write_board.to_string()));
             }
             GameResult::InProgress => {
                 return Ok(format!("{}\n", write_board.to_string()));
