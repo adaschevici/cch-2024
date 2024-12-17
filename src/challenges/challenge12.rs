@@ -1,21 +1,23 @@
 use rand::prelude::SliceRandom;
-use rand::thread_rng;
+
+use rand::{rngs::StdRng, Rng, SeedableRng};
 use std::fmt;
 use std::str::FromStr;
 
 use axum::{
     extract::{Path, State},
-    http::{HeaderMap, StatusCode},
+    http::StatusCode,
     response::{IntoResponse, Response, Result},
     routing::{get, post},
-    Json, Router,
+    Extension, Json, Router,
 };
-use tokio::sync::RwLock;
+use tokio::sync::{Mutex, RwLock};
 
 use std::{ops::DerefMut, sync::Arc, time::Duration};
 use thiserror::Error;
 
 type GameBoardType = Arc<RwLock<GameBoard>>;
+type RandomBoardSeed = Arc<RwLock<rand::rngs::StdRng>>;
 
 #[derive(Error, Debug)]
 enum AppError {
@@ -108,19 +110,21 @@ impl GameBoard {
         }
     }
 
-    fn new_random_board(rows: usize, columns: usize) -> Self {
+    fn new_random_board(rows: usize, columns: usize, seed: &mut StdRng) -> Self {
         let pieces = vec![BoardLocation::Cookie, BoardLocation::Milk];
-        let mut rng = rand::thread_rng();
         let board = (0..rows)
             .map(|row_index| {
                 if row_index == rows - 1 {
                     vec![BoardLocation::Wall; columns]
                 } else {
                     std::iter::once(BoardLocation::Wall)
-                        .chain(
-                            (1..columns - 1)
-                                .map(|_| *pieces.choose(&mut rng).unwrap_or(&BoardLocation::Empty)),
-                        )
+                        .chain((1..columns - 1).map(|_| {
+                            if seed.gen::<bool>() {
+                                pieces[0]
+                            } else {
+                                pieces[1]
+                            }
+                        }))
                         .chain(std::iter::once(BoardLocation::Wall))
                         .collect()
                 }
@@ -403,7 +407,14 @@ async fn place_piece(
     }
 }
 
-async fn reset_board(State(board): State<GameBoardType>) -> String {
+async fn reset_board(
+    State(board): State<GameBoardType>,
+    Extension(random_seed): Extension<RandomBoardSeed>,
+) -> String {
+    let mut seed = random_seed.write().await;
+    *seed = rand::rngs::StdRng::seed_from_u64(2024);
+    drop(seed);
+
     let new_board = GameBoard::new(5, 6);
     let mut write_board = board.write().await;
     *write_board = new_board;
@@ -411,19 +422,27 @@ async fn reset_board(State(board): State<GameBoardType>) -> String {
     return format!("{}", write_board.to_string());
 }
 
-async fn random_board(State(board): State<GameBoardType>) -> String {
-    let new_board = GameBoard::new_random_board(5, 6);
+async fn random_board(
+    State(board): State<GameBoardType>,
+    Extension(random_seed): Extension<RandomBoardSeed>,
+) -> String {
+    let mut seed = random_seed.write().await;
+    let new_board = GameBoard::new_random_board(5, 6, &mut seed);
+    let game_status = new_board.check(None);
     let mut write_board = board.write().await;
+
     *write_board = new_board;
-    return format!("{}", write_board.to_string());
+    return format!("{}{}", write_board.to_string(), game_status);
 }
 
 pub fn router() -> Router {
     let board = Arc::new(RwLock::new(GameBoard::new(5, 6)));
+    let board_seed = Arc::new(RwLock::new(rand::rngs::StdRng::seed_from_u64(2024)));
     Router::new()
         .route("/board", get(get_board))
         .route("/reset", post(reset_board))
         .route("/place/:team/:column", post(place_piece))
         .route("/random-board", get(random_board))
         .with_state(board.clone())
+        .layer(Extension(board_seed.clone()))
 }
