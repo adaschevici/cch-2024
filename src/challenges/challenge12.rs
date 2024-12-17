@@ -177,7 +177,7 @@ impl GameBoard {
         let mut count = 0;
         for i in (0..=3)
             .map(|i| (row as i32 - i, col as i32 - i))
-            .filter(|&(x, y)| x >= 1 && x <= self.rows as i32 && y >= 1 && y <= self.columns as i32)
+            .filter(|&(x, y)| x >= 0 && x <= self.rows as i32 && y >= 1 && y <= self.columns as i32)
             .map(|(x, y)| (x as usize, y as usize))
         {
             if self.board[i.0][i.1] == player {
@@ -186,13 +186,12 @@ impl GameBoard {
                 break;
             }
         }
-        for i in 1..=3 {
-            let new_row = row + i;
-            let new_col = col + i;
-            if new_row <= self.rows
-                && new_col <= self.columns
-                && self.board[new_row][new_col] == player
-            {
+        for i in (1..=3)
+            .map(|i| (row as i32 + i, col as i32 + i))
+            .filter(|&(x, y)| x >= 1 && x <= self.rows as i32 && y >= 1 && y <= self.columns as i32)
+            .map(|(x, y)| (x as usize, y as usize))
+        {
+            if self.board[i.0][i.1] == player {
                 count += 1;
             } else {
                 break;
