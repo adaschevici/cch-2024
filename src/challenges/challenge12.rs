@@ -23,14 +23,20 @@ enum AppError {
     ColumnOverflow,
     #[error("Invalid piece")]
     InvalidPiece,
+    #[error("Game over")]
+    GameOver(String),
 }
 
 impl IntoResponse for AppError {
     fn into_response(self) -> Response {
         let (status, error_message) = match self {
-            AppError::OutOfBounds => (StatusCode::BAD_REQUEST, "Out of bounds"),
-            AppError::ColumnOverflow => (StatusCode::SERVICE_UNAVAILABLE, "Column overflow"),
-            AppError::InvalidPiece => (StatusCode::NOT_FOUND, "Invalid piece"),
+            AppError::OutOfBounds => (StatusCode::BAD_REQUEST, "Out of bounds".to_string()),
+            AppError::ColumnOverflow => (
+                StatusCode::SERVICE_UNAVAILABLE,
+                "Column overflow".to_string(),
+            ),
+            AppError::InvalidPiece => (StatusCode::NOT_FOUND, "Invalid piece".to_string()),
+            AppError::GameOver(msg) => (StatusCode::SERVICE_UNAVAILABLE, msg),
         };
 
         (status, error_message).into_response()
@@ -75,6 +81,7 @@ struct GameBoard {
     rows: usize,
     columns: usize,
     board: Vec<Vec<BoardLocation>>,
+    game_status: GameResult,
 }
 
 impl GameBoard {
@@ -96,6 +103,7 @@ impl GameBoard {
             rows,
             columns,
             board,
+            game_status: GameResult::InProgress,
         }
     }
 
@@ -133,7 +141,6 @@ impl GameBoard {
     fn check_vertical(&self, row: usize, col: usize) -> (bool, BoardLocation) {
         let player = self.board[row][col].clone();
         if player == BoardLocation::Wall || player == BoardLocation::Empty {
-            println!("Wall or Empty");
             return (false, player);
         }
         let mut count = 0;
@@ -224,6 +231,9 @@ impl GameBoard {
         }
         return (false, player);
     }
+    fn set_game_status(&mut self, game_status: GameResult) {
+        self.game_status = game_status;
+    }
     fn check(&self, starting_position: Option<(usize, usize)>) -> GameResult {
         let empty_cells = self
             .board
@@ -245,22 +255,24 @@ impl GameBoard {
                 return GameResult::Win(player);
             }
         }
-        // for row in 1..=self.rows - 1 {
-        //     for col in 1..=self.columns - 1 {
-        //         let (horizontal_win, player) = self.check_horizontal(row, col);
-        //         if horizontal_win {
-        //             return GameResult::Win(player);
-        //         }
-        //         let (vertical_win, player) = self.check_vertical(row, col);
-        //         if vertical_win {
-        //             return GameResult::Win(player);
-        //         }
-        //         // let (diagonal_win, player) = self.check_diagonal(row, col);
-        //         // if diagonal_win {
-        //         //     return GameResult::Win(player);
-        //         // }
-        //     }
-        // }
+        if starting_position.is_none() {
+            for row in 1..=self.rows - 1 {
+                for col in 1..=self.columns - 1 {
+                    let (horizontal_win, player) = self.check_horizontal(row, col);
+                    if horizontal_win {
+                        return GameResult::Win(player);
+                    }
+                    let (vertical_win, player) = self.check_vertical(row, col);
+                    if vertical_win {
+                        return GameResult::Win(player);
+                    }
+                    let (diagonal_win, player) = self.check_diagonal(row, col);
+                    if diagonal_win {
+                        return GameResult::Win(player);
+                    }
+                }
+            }
+        }
         if empty_cells == 0 {
             return GameResult::Draw;
         }
@@ -295,7 +307,7 @@ impl fmt::Display for GameBoard {
     }
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 enum GameResult {
     Win(BoardLocation),
     Draw,
@@ -306,15 +318,23 @@ impl fmt::Display for GameResult {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             GameResult::Win(player) => write!(f, "{} wins!", player),
-            GameResult::Draw => write!(f, "Draw!"),
-            GameResult::InProgress => write!(f, "Game in progress"),
+            GameResult::Draw => write!(f, "No winner."),
+            GameResult::InProgress => write!(f, ""),
         }
     }
 }
 
 async fn get_board(State(board): State<GameBoardType>) -> String {
     let board_state = board.read().await;
-    return format!("{}{}", board_state.to_string(), board_state.check(None));
+    let game_status = board_state.game_status.clone();
+    match game_status {
+        GameResult::Win(_) | GameResult::Draw => {
+            return format!("{}{}\n", board_state.to_string(), game_status);
+        }
+        _ => {
+            return format!("{}{}", board_state.to_string(), game_status);
+        }
+    }
 }
 
 async fn place_piece(
@@ -323,35 +343,36 @@ async fn place_piece(
 ) -> Result<String, AppError> {
     let piece = BoardLocation::from_str(&team)?;
     let mut write_board = board.write().await;
+    if write_board.game_status == GameResult::Draw
+        || write_board.game_status == GameResult::Win(BoardLocation::Cookie)
+        || write_board.game_status == GameResult::Win(BoardLocation::Milk)
+    {
+        return Err(AppError::GameOver(format!(
+            "{}{}\n",
+            write_board.to_string(),
+            write_board.game_status
+        )));
+    }
     let current_move = write_board.set_cell(column, piece);
     if let Ok(play) = current_move {
         let game_status = write_board.check(Some(play));
         match game_status {
             GameResult::Win(player) => {
-                return Ok(format!("{}{} wins!", write_board.to_string(), player));
+                write_board.set_game_status(GameResult::Win(player.clone()));
+                return Ok(format!("{}{} wins!\n", write_board.to_string(), player));
             }
             GameResult::Draw => {
+                write_board.set_game_status(GameResult::Draw);
                 return Ok(format!("{}No winner.", write_board.to_string()));
             }
             GameResult::InProgress => {
-                return Ok(format!("{}\n", write_board.to_string()));
+                return Ok(format!("{}", write_board.to_string()));
             }
         }
     } else {
         return Err(AppError::ColumnOverflow);
     }
 }
-
-// async fn add_piece(State(board): State<GameBoardType>) -> Result<(), AppError> {
-//     let mut write_board = board.write().await;
-//     let mut last_move = write_board.set_cell(9, BoardLocation::Milk);
-//     last_move = write_board.set_cell(9, BoardLocation::Milk);
-//     last_move = write_board.set_cell(9, BoardLocation::Cookie);
-//     last_move = write_board.set_cell(9, BoardLocation::Milk);
-//     last_move = write_board.set_cell(9, BoardLocation::Milk);
-//     println!("{:?}", last_move);
-//     last_move
-// }
 
 async fn reset_board(State(board): State<GameBoardType>) -> String {
     let new_board = GameBoard::new(5, 6);
