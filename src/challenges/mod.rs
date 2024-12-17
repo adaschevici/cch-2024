@@ -1,6 +1,7 @@
 use axum::{http::StatusCode, response::IntoResponse, Router};
 
 mod challenge12;
+mod challenge16;
 mod challenge2;
 mod challenge5;
 mod challenge9;
@@ -31,4 +32,5 @@ pub(crate) fn router() -> Router {
         .nest("/5", challenge5::router())
         .nest("/9", challenge9::router())
         .nest("/12", challenge12::router())
+        .nest("/16", challenge16::router())
 }
