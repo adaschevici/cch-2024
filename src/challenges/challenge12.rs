@@ -363,7 +363,7 @@ async fn place_piece(
             }
             GameResult::Draw => {
                 write_board.set_game_status(GameResult::Draw);
-                return Ok(format!("{}No winner.", write_board.to_string()));
+                return Ok(format!("{}No winner.\n", write_board.to_string()));
             }
             GameResult::InProgress => {
                 return Ok(format!("{}", write_board.to_string()));
