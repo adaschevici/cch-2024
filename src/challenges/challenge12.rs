@@ -35,7 +35,7 @@ impl IntoResponse for AppError {
                 StatusCode::SERVICE_UNAVAILABLE,
                 "Column overflow".to_string(),
             ),
-            AppError::InvalidPiece => (StatusCode::NOT_FOUND, "Invalid piece".to_string()),
+            AppError::InvalidPiece => (StatusCode::BAD_REQUEST, "Invalid piece".to_string()),
             AppError::GameOver(msg) => (StatusCode::SERVICE_UNAVAILABLE, msg),
         };
 
@@ -368,6 +368,9 @@ async fn place_piece(
                 return Ok(format!("{}", write_board.to_string()));
             }
         }
+    }
+    if let Err(AppError::OutOfBounds) = current_move {
+        return Err(AppError::OutOfBounds);
     } else {
         return Err(AppError::ColumnOverflow);
     }
