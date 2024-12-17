@@ -279,7 +279,7 @@ impl GameBoard {
     }
 
     fn set_cell(&mut self, col: usize, value: BoardLocation) -> Result<(usize, usize), AppError> {
-        if (col > self.columns - 1) || (col < 1) {
+        if (col > self.columns - 2) || (col < 1) {
             return Err(AppError::OutOfBounds);
         }
 
