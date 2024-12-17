@@ -1,3 +1,5 @@
+use rand::prelude::SliceRandom;
+use rand::thread_rng;
 use std::fmt;
 use std::str::FromStr;
 
@@ -42,7 +44,7 @@ impl IntoResponse for AppError {
         (status, error_message).into_response()
     }
 }
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum BoardLocation {
     Empty,
     Milk,
@@ -86,19 +88,44 @@ struct GameBoard {
 
 impl GameBoard {
     fn new(rows: usize, columns: usize) -> Self {
-        let mut board = vec![vec![BoardLocation::Empty; columns]; rows];
-        for row in 0..rows {
-            for column in 0..columns {
-                if (row == 0 && column == 0)
-                    || (row == 0 && column == columns - 1)
-                    || row == rows - 1
-                    || column == 0
-                    || column == columns - 1
-                {
-                    board[row][column] = BoardLocation::Wall;
+        let board = (0..rows)
+            .map(|row_index| {
+                if row_index == rows - 1 {
+                    vec![BoardLocation::Wall; columns]
+                } else {
+                    std::iter::once(BoardLocation::Wall)
+                        .chain((1..columns - 1).map(|_| BoardLocation::Empty))
+                        .chain(std::iter::once(BoardLocation::Wall))
+                        .collect()
                 }
-            }
+            })
+            .collect();
+        Self {
+            rows,
+            columns,
+            board,
+            game_status: GameResult::InProgress,
         }
+    }
+
+    fn new_random_board(rows: usize, columns: usize) -> Self {
+        let pieces = vec![BoardLocation::Cookie, BoardLocation::Milk];
+        let mut rng = rand::thread_rng();
+        let board = (0..rows)
+            .map(|row_index| {
+                if row_index == rows - 1 {
+                    vec![BoardLocation::Wall; columns]
+                } else {
+                    std::iter::once(BoardLocation::Wall)
+                        .chain(
+                            (1..columns - 1)
+                                .map(|_| *pieces.choose(&mut rng).unwrap_or(&BoardLocation::Empty)),
+                        )
+                        .chain(std::iter::once(BoardLocation::Wall))
+                        .collect()
+                }
+            })
+            .collect();
         Self {
             rows,
             columns,
@@ -384,11 +411,19 @@ async fn reset_board(State(board): State<GameBoardType>) -> String {
     return format!("{}", write_board.to_string());
 }
 
+async fn random_board(State(board): State<GameBoardType>) -> String {
+    let new_board = GameBoard::new_random_board(5, 6);
+    let mut write_board = board.write().await;
+    *write_board = new_board;
+    return format!("{}", write_board.to_string());
+}
+
 pub fn router() -> Router {
     let board = Arc::new(RwLock::new(GameBoard::new(5, 6)));
     Router::new()
         .route("/board", get(get_board))
         .route("/reset", post(reset_board))
         .route("/place/:team/:column", post(place_piece))
+        .route("/random-board", get(random_board))
         .with_state(board.clone())
 }
