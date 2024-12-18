@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use tokio::sync::{Mutex, RwLock};
 
 use chrono::{Duration, Utc};
@@ -12,9 +13,13 @@ use axum::{
     Extension, Json, Router,
 };
 use axum_extra::extract::CookieJar;
-use jsonwebtoken::{encode, errors::ErrorKind, DecodingKey, EncodingKey, Header};
+use jsonwebtoken::{
+    decode, decode_header, encode, errors::ErrorKind, DecodingKey, EncodingKey, Header, Validation,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+
+const PUBLIC_KEY: &[u8] = include_bytes!("../assets/keys/public_key.pem");
 
 #[derive(Error, Debug)]
 enum AppError {
@@ -23,6 +28,18 @@ enum AppError {
 
     #[error("Missing Cookie Header")]
     MissingCookie,
+
+    #[error("Decoding error")]
+    HeaderDecodingError(jsonwebtoken::errors::Error),
+
+    #[error("Decoding error")]
+    DecodingError,
+
+    #[error("Invalid signature")]
+    InvalidSignature,
+
+    #[error("Key missing")]
+    KeyMissing,
 }
 
 impl IntoResponse for AppError {
@@ -30,6 +47,13 @@ impl IntoResponse for AppError {
         let (status, error_message) = match self {
             AppError::MissingContentType => (StatusCode::BAD_REQUEST, "Invalid Content-Type"),
             AppError::MissingCookie => (StatusCode::BAD_REQUEST, "Missing Cookie Header"),
+            AppError::KeyMissing => (StatusCode::INTERNAL_SERVER_ERROR, "Key missing"),
+            AppError::HeaderDecodingError(err) => {
+                eprintln!("Header Decoding error: {err}");
+                (StatusCode::BAD_REQUEST, "Header Decoding error")
+            }
+            AppError::DecodingError => (StatusCode::BAD_REQUEST, "Decoding error"),
+            AppError::InvalidSignature => (StatusCode::UNAUTHORIZED, "Invalid signature"),
         };
 
         (status, error_message).into_response()
@@ -100,7 +124,6 @@ async fn unwrap_package(
         return Err(AppError::MissingCookie);
     };
     let token = cookie.value();
-    println!("{}", token);
     let response = match jsonwebtoken::decode::<Claim>(
         token,
         &DecodingKey::from_secret(secret.read().await.as_bytes()),
@@ -122,10 +145,40 @@ async fn unwrap_package(
     }
 }
 
+async fn decode_package(jwt_token: String) -> Result<Json<Value>, AppError> {
+    let header = match decode_header(&jwt_token) {
+        Ok(h) => h,
+        Err(e) => {
+            return Err(AppError::HeaderDecodingError(e));
+        }
+    };
+    let Ok(key) = DecodingKey::from_rsa_pem(PUBLIC_KEY) else {
+        return Err(AppError::KeyMissing);
+    };
+    let mut validation = Validation::new(header.alg);
+    validation.required_spec_claims = HashSet::new();
+    validation.validate_exp = false;
+
+    let claim = match decode::<Value>(&jwt_token, &key, &validation) {
+        Ok(t) => t.claims,
+        Err(e) if e.kind() == &jsonwebtoken::errors::ErrorKind::InvalidSignature => {
+            eprintln!("invalid JWT signature");
+            return Err(AppError::InvalidSignature);
+        }
+        Err(e) => {
+            eprintln!("problem with decoding JWT token: {e:?}");
+            return Err(AppError::DecodingError);
+        }
+    };
+
+    Ok(Json(claim))
+}
+
 pub fn router() -> Router {
     let secret = Arc::new(RwLock::new("very_secret_key".to_string()));
     Router::new()
         .route("/wrap", post(wrap_package))
         .route("/unwrap", get(unwrap_package))
+        .route("/decode", post(decode_package))
         .with_state(secret)
 }
