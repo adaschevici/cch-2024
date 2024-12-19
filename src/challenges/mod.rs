@@ -1,7 +1,9 @@
 use axum::{http::StatusCode, response::IntoResponse, Router};
+use sqlx::PgPool;
 
 mod challenge12;
 mod challenge16;
+mod challenge19;
 mod challenge2;
 mod challenge5;
 mod challenge9;
@@ -25,7 +27,7 @@ impl<E: Into<anyhow::Error>> From<E> for AppError {
         Self(err.into())
     }
 }
-pub(crate) fn router() -> Router {
+pub(crate) fn router(pool: PgPool) -> Router {
     Router::new()
         .nest("/", challengeminus1::router())
         .nest("/2", challenge2::router())
@@ -33,4 +35,5 @@ pub(crate) fn router() -> Router {
         .nest("/9", challenge9::router())
         .nest("/12", challenge12::router())
         .nest("/16", challenge16::router())
+        .nest("/19", challenge19::router(pool))
 }
