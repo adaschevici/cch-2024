@@ -1,10 +1,11 @@
 use axum::{
-    extract::{Path, State},
+    extract::{Path, Query, State},
     http::StatusCode,
     response::{IntoResponse, Response, Result},
     routing::{delete, get, post, put},
     Json, Router,
 };
+use rand::{distributions::Alphanumeric, Rng};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sqlx::{FromRow, PgPool, Row};
@@ -50,7 +51,7 @@ impl IntoResponse for AppError {
 }
 async fn reset_db(State(state): State<Arc<AppState>>) -> Result<StatusCode, AppError> {
     let transaction = state.pool.begin().await.unwrap();
-    sqlx::query("DELETE FROM quotes;")
+    sqlx::query("TRUNCATE TABLE quotes;")
         .execute(&state.pool)
         .await?;
     transaction.commit().await?;
@@ -185,6 +186,59 @@ async fn add_quote_with_random_uuid_id(
     Ok((StatusCode::CREATED, Json(quote))) // wtf ???
 }
 
+#[derive(FromRow, Serialize, Deserialize, Debug)]
+struct Page {
+    page_number: i32,
+    quotes: Vec<QuoteRecord>,
+    next_token: String,
+}
+
+#[derive(Deserialize)]
+struct QueryParams {
+    token: Option<String>,
+}
+
+fn generate_cursor() -> String {
+    rand::thread_rng()
+        .sample_iter(&Alphanumeric)
+        .take(16)
+        .map(char::from)
+        .collect::<String>()
+}
+
+async fn paginated_quotes_list(
+    State(state): State<Arc<AppState>>,
+    Query(params): Query<QueryParams>,
+) -> Result<Json<Vec<QuoteRecord>>, AppError> {
+    let (count,): (i64,) = sqlx::query_as("SELECT COUNT(id) from quotes")
+        .fetch_one(&state.pool)
+        .await?;
+    println!("{:?}", count);
+    if let Some(token) = params.token {
+        println!("{:?}", token);
+    }
+    // let page_number = if let Some(Query(query)) = query {
+    //     let mut map = state.token_map.lock().unwrap();
+    //     let number = map
+    //         .get(&query.token)
+    //         .map(|i| *i)
+    //         .ok_or(StatusCode::BAD_REQUEST)?;
+    //     map.remove(&query.token);
+    //     number
+    // } else {
+    //     0
+    // };
+    // let cursor = cursor.unwrap_or(Uuid::nil());
+    let quotes = sqlx::query_as::<_, QuoteRecord>(
+        "SELECT * FROM quotes ORDER BY created_at ASC LIMIT 3 OFFSET $1",
+    )
+    .bind(offset)
+    .fetch_all(&state.pool)
+    .await
+    .map_err(AppError::DatabaseError)?;
+    Ok(Json(quotes))
+}
+
 pub fn router(pool: PgPool) -> Router {
     let shared_state = Arc::new(AppState { pool });
     Router::new()
@@ -193,5 +247,6 @@ pub fn router(pool: PgPool) -> Router {
         .route("/remove/:id", delete(delete_quote_by_id))
         .route("/undo/:id", put(update_quote_by_id_increment_version))
         .route("/draft", post(add_quote_with_random_uuid_id))
+        .route("/list", get(paginated_quotes_list))
         .with_state(shared_state)
 }
