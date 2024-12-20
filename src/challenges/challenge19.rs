@@ -147,21 +147,25 @@ async fn delete_quote_by_id(
 async fn update_quote_by_id_increment_version(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
+    Json(quote): Json<Quote>,
 ) -> Result<Json<QuoteRecord>, AppError> {
     let id: Uuid = id
         .parse()
         .map_err(|_| AppError::InvalidID("Invalid ID".to_string()))?;
     let quote = sqlx::query_as::<_, QuoteRecord>(
-        "UPDATE quotes SET version = version + 1 WHERE id = $1 RETURNING *",
+        "UPDATE quotes SET author = $2, quote = $3, version = version + 1
+            WHERE id = $1 RETURNING *",
     )
     .bind(id)
+    .bind(quote.author)
+    .bind(quote.quote)
     .fetch_one(&state.pool)
     .await
     .map_err(|e| match e {
         sqlx::Error::RowNotFound => AppError::QuoteNotFound,
         _ => AppError::DatabaseError(e),
     })?;
-    Ok(Json(quote)) // wtf ???
+    Ok(Json(quote))
 }
 
 async fn add_quote_with_random_uuid_id(
@@ -178,7 +182,6 @@ async fn add_quote_with_random_uuid_id(
     .fetch_one(&state.pool)
     .await
     .map_err(AppError::DatabaseError)?;
-    println!("quote: {:?}", quote);
     Ok((StatusCode::CREATED, Json(quote))) // wtf ???
 }
 
