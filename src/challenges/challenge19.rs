@@ -9,13 +9,16 @@ use rand::{distributions::Alphanumeric, Rng};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sqlx::{FromRow, PgPool, Row};
-use std::sync::Arc;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 use thiserror::Error;
+use tokio::sync::RwLock;
 use uuid::Uuid;
 
 #[derive(Debug, Clone)]
 struct AppState {
     pool: PgPool,
+    token_map: Arc<RwLock<HashMap<String, i64>>>,
 }
 
 #[derive(Error, Debug)]
@@ -28,6 +31,9 @@ enum AppError {
 
     #[error("Database error: {0}")]
     DatabaseError(#[from] sqlx::Error),
+
+    #[error("Pagination error")]
+    PaginationError,
 }
 
 impl IntoResponse for AppError {
@@ -44,6 +50,7 @@ impl IntoResponse for AppError {
             AppError::InvalidID(quote_id) => {
                 (StatusCode::BAD_REQUEST, format!("Invalid ID: {}", quote_id))
             }
+            AppError::PaginationError => (StatusCode::BAD_REQUEST, "Pagination error".to_string()),
         };
 
         (status, error_message).into_response()
@@ -188,9 +195,9 @@ async fn add_quote_with_random_uuid_id(
 
 #[derive(FromRow, Serialize, Deserialize, Debug)]
 struct Page {
-    page_number: i32,
+    page: i64,
     quotes: Vec<QuoteRecord>,
-    next_token: String,
+    next_token: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -209,38 +216,59 @@ fn generate_cursor() -> String {
 async fn paginated_quotes_list(
     State(state): State<Arc<AppState>>,
     Query(params): Query<QueryParams>,
-) -> Result<Json<Vec<QuoteRecord>>, AppError> {
+) -> Result<Json<Page>, AppError> {
     let (count,): (i64,) = sqlx::query_as("SELECT COUNT(id) from quotes")
         .fetch_one(&state.pool)
         .await?;
-    println!("{:?}", count);
-    if let Some(token) = params.token {
+    let page_number: i64 = if let Some(token) = params.token {
         println!("{:?}", token);
-    }
-    // let page_number = if let Some(Query(query)) = query {
-    //     let mut map = state.token_map.lock().unwrap();
-    //     let number = map
-    //         .get(&query.token)
-    //         .map(|i| *i)
-    //         .ok_or(StatusCode::BAD_REQUEST)?;
-    //     map.remove(&query.token);
-    //     number
-    // } else {
-    //     0
-    // };
-    // let cursor = cursor.unwrap_or(Uuid::nil());
-    let quotes = sqlx::query_as::<_, QuoteRecord>(
-        "SELECT * FROM quotes ORDER BY created_at ASC LIMIT 3 OFFSET $1",
+        let mut map = state.token_map.write().await;
+        let number = map
+            .get(token.as_str())
+            .map(|i| *i)
+            .ok_or(AppError::PaginationError)?;
+        map.remove(token.as_str());
+        number
+    } else {
+        0
+    };
+    let offset = page_number * 3;
+    let next_token = if offset + 3 >= count {
+        None
+    } else {
+        let token = generate_cursor();
+        state
+            .token_map
+            .write()
+            .await
+            .insert(token.clone(), page_number + 1);
+        Some(token)
+    };
+
+    let quotes = sqlx::query_as(
+        "
+            SELECT id,author,quote,created_at,version
+            FROM quotes
+            ORDER BY created_at ASC
+            LIMIT 3 OFFSET $1
+            ",
     )
     .bind(offset)
     .fetch_all(&state.pool)
     .await
-    .map_err(AppError::DatabaseError)?;
-    Ok(Json(quotes))
-}
+    .map_err(|err| AppError::DatabaseError(err))?;
 
+    Ok(Json(Page {
+        quotes,
+        page: page_number + 1,
+        next_token,
+    }))
+}
 pub fn router(pool: PgPool) -> Router {
-    let shared_state = Arc::new(AppState { pool });
+    let shared_state = Arc::new(AppState {
+        pool,
+        token_map: Arc::new(RwLock::new(HashMap::new())),
+    });
     Router::new()
         .route("/reset", post(reset_db))
         .route("/cite/:id", get(get_quote_by_id))
@@ -248,5 +276,6 @@ pub fn router(pool: PgPool) -> Router {
         .route("/undo/:id", put(update_quote_by_id_increment_version))
         .route("/draft", post(add_quote_with_random_uuid_id))
         .route("/list", get(paginated_quotes_list))
+        // .route("/list-notmine", get(list))
         .with_state(shared_state)
 }
