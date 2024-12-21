@@ -7,10 +7,9 @@ use axum::{
 };
 use rand::{distributions::Alphanumeric, Rng};
 use serde::{Deserialize, Serialize};
-use serde_json::json;
-use sqlx::{FromRow, PgPool, Row};
+use sqlx::{FromRow, PgPool};
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use thiserror::Error;
 use tokio::sync::RwLock;
 use uuid::Uuid;
@@ -63,19 +62,6 @@ async fn reset_db(State(state): State<Arc<AppState>>) -> Result<StatusCode, AppE
         .await?;
     transaction.commit().await?;
 
-    // sqlx::query(
-    //     "CREATE TABLE IF NOT EXISTS quotes (
-    //     id UUID PRIMARY KEY,
-    //     author TEXT NOT NULL,
-    //     quote TEXT NOT NULL,
-    //     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    //     version INT NOT NULL DEFAULT 1
-    // );",
-    // )
-    // .execute(&state.pool)
-    // .await
-    // .unwrap();
-
     Ok(StatusCode::OK)
 }
 
@@ -93,26 +79,6 @@ struct QuoteRecord {
     version: i32,
     created_at: chrono::DateTime<chrono::Utc>,
 }
-// impl Quote {
-//     fn new(author: String, quote: String) -> Self {
-//         Self {
-//             id: Uuid::new_v4(),
-//             author,
-//             quote,
-//         }
-//     }
-// }
-
-// async fn get_quote_by_id(
-//     Path(id): Path<String>,
-//     State(state): State<Arc<AppState>>,
-// ) -> Result<Quote, AppError> {
-//     let quote = sqlx::query_as::<_, Quote>("SELECT * FROM quotes WHERE id = $1")
-//         .bind(&id)
-//         .fetch_one(&state.pool)
-//         .await?;
-//     Ok(quote)
-// }
 
 async fn get_quote_by_id(
     State(state): State<Arc<AppState>>,
@@ -221,7 +187,6 @@ async fn paginated_quotes_list(
         .fetch_one(&state.pool)
         .await?;
     let page_number: i64 = if let Some(token) = params.token {
-        println!("{:?}", token);
         let mut map = state.token_map.write().await;
         let number = map
             .get(token.as_str())
@@ -276,6 +241,5 @@ pub fn router(pool: PgPool) -> Router {
         .route("/undo/:id", put(update_quote_by_id_increment_version))
         .route("/draft", post(add_quote_with_random_uuid_id))
         .route("/list", get(paginated_quotes_list))
-        // .route("/list-notmine", get(list))
         .with_state(shared_state)
 }
