@@ -5,6 +5,7 @@ mod challenge12;
 mod challenge16;
 mod challenge19;
 mod challenge2;
+mod challenge23;
 mod challenge5;
 mod challenge9;
 mod challengeminus1;
@@ -36,4 +37,5 @@ pub(crate) fn router(pool: PgPool) -> Router {
         .nest("/12", challenge12::router())
         .nest("/16", challenge16::router())
         .nest("/19", challenge19::router(pool))
+        .nest("/23", challenge23::router())
 }
