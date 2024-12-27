@@ -6,7 +6,6 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
-use tower_http::services::ServeDir;
 
 #[derive(Error, Debug)]
 enum AppError {
@@ -46,12 +45,10 @@ impl IntoResponse for AppError {
         (status, error_message).into_response()
     }
 }
-async fn star() -> Result<(), AppError> {
-    Ok(())
+async fn star() -> Result<String, AppError> {
+    Ok(r#"<div id="star" class="lit"></div>"#.to_string())
 }
 
 pub fn router() -> Router {
-    Router::new()
-        .route("/star", get(star))
-        .nest_service("/assets", ServeDir::new("assets"))
+    Router::new().route("/star", get(star))
 }
