@@ -1,5 +1,6 @@
 use axum::{http::StatusCode, response::IntoResponse, Router};
 use sqlx::PgPool;
+use tower_http::services::ServeDir;
 
 mod challenge12;
 mod challenge16;
@@ -38,4 +39,5 @@ pub(crate) fn router(pool: PgPool) -> Router {
         .nest("/16", challenge16::router())
         .nest("/19", challenge19::router(pool))
         .nest("/23", challenge23::router())
+        .nest_service("/assets", ServeDir::new("assets"))
 }
