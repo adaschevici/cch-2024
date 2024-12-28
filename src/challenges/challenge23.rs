@@ -9,6 +9,7 @@ use axum_extra::extract::Multipart;
 use serde::{Deserialize, Serialize};
 use tera::escape_html;
 use thiserror::Error;
+use toml::{map::Map, Value};
 
 #[derive(Error, Debug)]
 enum AppError {
@@ -20,6 +21,12 @@ enum AppError {
 
     #[error("Invalid checksum")]
     Unprocessable,
+
+    #[error("Missing manifest")]
+    MissingManifest,
+
+    #[error("Unusable manifest")]
+    UnusableManifest,
 }
 
 impl IntoResponse for AppError {
@@ -28,6 +35,8 @@ impl IntoResponse for AppError {
             AppError::Teapot => (StatusCode::IM_A_TEAPOT, "Invalid color requested"),
             AppError::NoChecksums => (StatusCode::BAD_REQUEST, "No checksums found"),
             AppError::Unprocessable => (StatusCode::UNPROCESSABLE_ENTITY, "Invalid checksum"),
+            AppError::MissingManifest => (StatusCode::BAD_REQUEST, "Missing manifest"),
+            AppError::UnusableManifest => (StatusCode::BAD_REQUEST, "Unusable manifest"),
         };
 
         (status, error_message).into_response()
@@ -78,7 +87,7 @@ struct Package {
 impl Package {
     fn extract_style_tuple(self) -> Option<(String, i32, i32)> {
         let checksum = self.checksum;
-        let color = self.checksum.get(0..6).ok_or("Checksum is too short")?;
+        let color = checksum.get(0..6).ok_or("Checksum is too short").ok()?;
         color
             .chars()
             .all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase())
@@ -93,6 +102,25 @@ impl Package {
 
 async fn render_checksums(mut multipart: Multipart) -> Result<Html<String>, AppError> {
     let mut divs = Vec::new();
+    while let Some(field) = multipart
+        .next_field()
+        .await
+        .map_err(|_| AppError::MissingManifest)?
+    {
+        let data = field.text().await.map_err(|_| AppError::MissingManifest)?;
+        let payload: Map<String, Value> =
+            toml::from_str(&data).map_err(|_| AppError::MissingManifest)?;
+        let packages = payload["package"].as_array().unwrap();
+
+        for package in packages {
+            if let Ok(payload) = package.clone().try_into::<Package>() {
+                let d = payload
+                    .extract_style_tuple()
+                    .ok_or(AppError::Unprocessable)?;
+                divs.push(d);
+            }
+        }
+    }
     if divs.is_empty() {
         return Err(AppError::NoChecksums);
     }
@@ -110,5 +138,5 @@ pub fn router() -> Router {
         .route("/star", get(star))
         .route("/present/:color", get(flip_present_color))
         .route("/ornament/:state/:n", get(flip_ornament_state))
-        .route("/lockfile", post(upload_manifest))
+        .route("/lockfile", post(render_checksums))
 }
